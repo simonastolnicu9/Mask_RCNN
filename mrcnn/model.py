@@ -2204,6 +2204,7 @@ class MaskRCNN():
         elif self.config.OPTIMIZER == 'ADAM':
           optimizer = keras.optimizers.Adam(
               lr=learning_rate,
+              amsgrad=True,
               clipnorm=self.config.GRADIENT_CLIP_NORM)
         else:
           raise InvalidConfigException(f"Invalid optimizer {config.OPTIMIZER}")
