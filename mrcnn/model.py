@@ -24,6 +24,10 @@ import keras.engine as KE
 import keras.models as KM
 
 from mrcnn import utils
+from PIL import Image
+
+from io import BytesIO
+import base64
 
 # Requires TensorFlow 1.3+ and Keras 2.0.8+.
 from distutils.version import LooseVersion
@@ -34,6 +38,21 @@ assert LooseVersion(keras.__version__) >= LooseVersion('2.0.8')
 ############################################################
 #  Utility Functions
 ############################################################
+
+class ConvertorLayer(KL.Layer):
+  def __init__(self, config=None, **kwargs):
+    super(ConvertorLayer, self).__init__(**kwargs)
+    self.config = config
+    
+  def call(self, inputs):
+    decoded_image_input = K.tf.decode_base64(inputs)
+    image_input = K.map_fn(lambda s: K.tf.image.decode_jpeg(s[0], channels=3), decoded_image_input, dtype='uint8')
+    image_input = K.cast(image_input - self.config.MEAN_PIXEL, 'float32')
+
+    return image_input
+  
+  def compute_output_shape(self, input_shape):
+    return (None, None, None, 3)
 
 def log(text, array=None):
     """Prints a text message. And, optionally, if a Numpy array is provided it
@@ -326,7 +345,7 @@ class ProposalLayer(KE.Layer):
             return proposals
         proposals = utils.batch_slice([boxes, scores], nms,
                                       self.config.IMAGES_PER_GPU)
-        return proposals
+        return K.reshape(proposals, (-1, self.proposal_count, 4))
 
     def compute_output_shape(self, input_shape):
         return (None, self.proposal_count, 4)
@@ -1812,6 +1831,17 @@ def data_generator(dataset, config, shuffle=True, augment=False, augmentation=No
             if error_count > 5:
                 raise
 
+def molded_images_to_base64(molded_images, config):
+    b64_molded_images = []
+    for image in molded_images:
+        image += config.MEAN_PIXEL
+        image = Image.fromarray(image.astype('uint8'))
+        buff = BytesIO()
+        image.save(buff, "jpeg")
+        b64_image = base64.urlsafe_b64encode(buff.getvalue()).decode('utf-8')
+        b64_molded_images.append([b64_image])
+    return np.array(b64_molded_images)
+
 
 ############################################################
 #  MaskRCNN Class
@@ -1852,8 +1882,13 @@ class MaskRCNN():
                             "For example, use 256, 320, 384, 448, 512, ... etc. ")
 
         # Inputs
-        input_image = KL.Input(
-            shape=[None, None, config.IMAGE_SHAPE[2]], name="input_image")
+        if mode == "training":
+            input_image = KL.Input(
+                shape=[None, None, config.IMAGE_SHAPE[2]], name="input_image")
+        elif mode == "inference":
+            base64_image = KL.Input(shape=(None,), dtype="string", name='input_image')
+            input_image = ConvertorLayer(self.config, name='convertor')(base64_image)
+
         input_image_meta = KL.Input(shape=[config.IMAGE_META_SIZE],
                                     name="input_image_meta")
         if mode == "training":
@@ -2051,7 +2086,7 @@ class MaskRCNN():
                                               config.NUM_CLASSES,
                                               train_bn=config.TRAIN_BN)
 
-            model = KM.Model([input_image, input_image_meta, input_anchors],
+            model = KM.Model([base64_image, input_image_meta, input_anchors],
                              [detections, mrcnn_class, mrcnn_bbox,
                                  mrcnn_mask, rpn_rois, rpn_class, rpn_bbox],
                              name='mask_rcnn')
@@ -2521,7 +2556,7 @@ class MaskRCNN():
             log("anchors", anchors)
         # Run object detection
         detections, _, _, mrcnn_mask, _, _, _ =\
-            self.keras_model.predict([molded_images, image_metas, anchors], verbose=0)
+            self.keras_model.predict([molded_images_to_base64(molded_images, self.config), image_metas, anchors], verbose=0)
         # Process detections
         results = []
         for i, image in enumerate(images):
@@ -2578,7 +2613,7 @@ class MaskRCNN():
             log("anchors", anchors)
         # Run object detection
         detections, _, _, mrcnn_mask, _, _, _ =\
-            self.keras_model.predict([molded_images, image_metas, anchors], verbose=0)
+            self.keras_model.predict([molded_images_to_base64(molded_images, self.config), image_metas, anchors], verbose=0)
         # Process detections
         results = []
         for i, image in enumerate(molded_images):
