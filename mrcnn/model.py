@@ -1853,7 +1853,7 @@ class MaskRCNN():
     The actual Keras model is in the keras_model property.
     """
 
-    def __init__(self, mode, config, model_dir):
+    def __init__(self, mode, config, model_dir, base64_layer=False):
         """
         mode: Either "training" or "inference"
         config: A Sub-class of the Config class
@@ -1864,9 +1864,9 @@ class MaskRCNN():
         self.config = config
         self.model_dir = model_dir
         self.set_log_dir()
-        self.keras_model = self.build(mode=mode, config=config)
+        self.keras_model = self.build(mode=mode, config=config, base64_layer=base64_layer)
 
-    def build(self, mode, config):
+    def build(self, mode, config, base64_layer=False):
         """Build Mask R-CNN architecture.
             input_shape: The shape of the input image.
             mode: Either "training" or "inference". The inputs and
@@ -1882,10 +1882,10 @@ class MaskRCNN():
                             "For example, use 256, 320, 384, 448, 512, ... etc. ")
 
         # Inputs
-        if mode == "training":
+        if not base64_layer:
             input_image = KL.Input(
                 shape=[None, None, config.IMAGE_SHAPE[2]], name="input_image")
-        elif mode == "inference":
+        else:
             base64_image = KL.Input(shape=(None,), dtype="string", name='input_image')
             input_image = ConvertorLayer(self.config, name='convertor')(base64_image)
 
@@ -2054,7 +2054,9 @@ class MaskRCNN():
                 [target_mask, target_class_ids, mrcnn_mask])
 
             # Model
-            inputs = [input_image, input_image_meta,
+            input_image_layer = base64_image if base64_layer else input_image
+
+            inputs = [input_image_layer, input_image_meta,
                       input_rpn_match, input_rpn_bbox, input_gt_class_ids, input_gt_boxes, input_gt_masks]
             if not config.USE_RPN_ROIS:
                 inputs.append(input_rois)
@@ -2086,7 +2088,9 @@ class MaskRCNN():
                                               config.NUM_CLASSES,
                                               train_bn=config.TRAIN_BN)
 
-            model = KM.Model([base64_image, input_image_meta, input_anchors],
+            input_image_layer = base64_image if base64_layer else input_image
+
+            model = KM.Model([input_image_layer, input_image_meta, input_anchors],
                              [detections, mrcnn_class, mrcnn_bbox,
                                  mrcnn_mask, rpn_rois, rpn_class, rpn_bbox],
                              name='mask_rcnn')
