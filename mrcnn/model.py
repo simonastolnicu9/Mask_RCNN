@@ -1864,6 +1864,7 @@ class MaskRCNN():
         self.config = config
         self.model_dir = model_dir
         self.set_log_dir()
+        self.use_base64 = base64_layer
         self.keras_model = self.build(mode=mode, config=config, base64_layer=base64_layer)
 
     def build(self, mode, config, base64_layer=False):
@@ -2559,8 +2560,10 @@ class MaskRCNN():
             log("image_metas", image_metas)
             log("anchors", anchors)
         # Run object detection
+
+        network_input_images = molded_images if not self.use_base64 else molded_images_to_base64(molded_images, self.cofig)
         detections, _, _, mrcnn_mask, _, _, _ =\
-            self.keras_model.predict([molded_images_to_base64(molded_images, self.config), image_metas, anchors], verbose=0)
+            self.keras_model.predict([network_input_images, image_metas, anchors], verbose=0)
         # Process detections
         results = []
         for i, image in enumerate(images):
@@ -2616,8 +2619,9 @@ class MaskRCNN():
             log("image_metas", image_metas)
             log("anchors", anchors)
         # Run object detection
+        network_input_images = molded_images if not self.use_base64 else molded_images_to_base64(molded_images, self.cofig)
         detections, _, _, mrcnn_mask, _, _, _ =\
-            self.keras_model.predict([molded_images_to_base64(molded_images, self.config), image_metas, anchors], verbose=0)
+            self.keras_model.predict([network_input_images, image_metas, anchors], verbose=0)
         # Process detections
         results = []
         for i, image in enumerate(molded_images):
